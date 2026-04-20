@@ -35,15 +35,23 @@ docker push yourdockerhub/woodland-chess-worker
 
 ## Automated Docker Hub publish (GitHub Actions)
 
-This repository includes a workflow at `.github/workflows/docker-publish.yml`
-that automatically builds and pushes the image on pushes to `main`/`master`
-when Docker-related files change.
+This repository uses a 2-step GitHub Actions flow:
+
+1. PR validation workflow (`.github/workflows/docker-pr-build.yml`)
+	- Trigger: pull requests to `main`/`master` when Docker-related files change
+	- Action: builds the image only (no Docker Hub push)
+	- Purpose: catch Docker/build issues before merge
+
+2. Publish workflow (`.github/workflows/docker-publish.yml`)
+	- Trigger: pushes to `main`/`master` when Docker-related files change
+	- Action: builds and pushes the image to Docker Hub
 
 Watched paths:
 - `Dockerfile`
 - `requirements.txt`
 - `handler.py`
 - `stockfish_pipeline/**`
+- `.github/workflows/docker-pr-build.yml`
 - `.github/workflows/docker-publish.yml`
 
 It publishes two tags:
@@ -54,7 +62,7 @@ Set these GitHub repository secrets before using it:
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN` (Docker Hub access token, not your password)
 
-You can also run it manually from the Actions tab via `workflow_dispatch`.
+Both workflows can also be run manually from the Actions tab via `workflow_dispatch`.
 
 ## RunPod endpoint settings
 

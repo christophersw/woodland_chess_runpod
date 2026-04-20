@@ -10,6 +10,7 @@ on:
       - requirements.txt
       - handler.py
       - stockfish_pipeline/**
+      - .github/workflows/docker-pr-build.yml
       - .github/workflows/docker-publish.yml
   workflow_dispatch:
 
