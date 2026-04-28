@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     app_name: str = "Stockfish Pipeline"
     database_url: str = ""
     chess_com_usernames: str = ""
-    chess_com_user_agent: str = "stockfish-pipeline/0.1"
+    chess_com_user_agent: str = "wood-league-stockfish/0.1"
     ingest_month_limit: int = 24
     stockfish_path: str = ""
     analysis_depth: int = 20

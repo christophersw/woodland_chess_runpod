@@ -1,18 +1,18 @@
-# woodland_chess_runpod
+# wood_league_chess_runpod
 
 RunPod Serverless CPU worker for Stockfish game analysis.
 
 ## What it does
 
 Receives a job with a `game_id` and PGN string, runs Stockfish analysis using
-the `woodland_stockfish` pipeline logic, and writes results directly to the
+the `wood_league_stockfish` pipeline logic, and writes results directly to the
 shared PostgreSQL database. Scales to zero when idle ($0 cost).
 
 ## Local testing
 
 ```bash
-# Copy the stockfish_pipeline package from woodland_stockfish
-cp -r ../woodland_stockfish/stockfish_pipeline .
+# Copy the stockfish_pipeline package from wood_league_stockfish
+cp -r ../wood_league_stockfish/stockfish_pipeline .
 
 pip install -r requirements.txt
 
@@ -28,10 +28,10 @@ python handler.py
 
 ```bash
 # Copy pipeline package first
-cp -r ../woodland_stockfish/stockfish_pipeline .
+cp -r ../wood_league_stockfish/stockfish_pipeline .
 
-docker build -t yourdockerhub/woodland-chess-worker .
-docker push yourdockerhub/woodland-chess-worker
+docker build -t yourdockerhub/wood-league-chess-worker .
+docker push yourdockerhub/wood-league-chess-worker
 ```
 
 ## Automated Docker Hub publish (GitHub Actions)

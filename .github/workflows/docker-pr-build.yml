@@ -33,6 +33,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
-          tags: woodland-chess-runpod:pr-check
+          tags: wood-league-chess-runpod:pr-check
           cache-from: type=gha
           cache-to: type=gha,mode=max

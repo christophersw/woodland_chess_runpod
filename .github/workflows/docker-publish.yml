@@ -37,7 +37,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/woodland-chess-runpod
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/wood-league-chess-runpod
           tags: |
             type=raw,value=latest
             type=sha,format=short
