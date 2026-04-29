@@ -37,6 +37,8 @@ class MoveResult:
     cp_eval: float        # eval after the move was played (white-relative, centipawns)
     best_move: str        # UCI of the engine's top choice before this move
     arrow_uci: str        # same as best_move (consumed by the board UI)
+    arrow_uci_2: str      # 2nd-best candidate move UCI (empty string if unavailable)
+    arrow_uci_3: str      # 3rd-best candidate move UCI (empty string if unavailable)
     cpl: float            # centipawn loss for the side that just moved (≥ 0)
     classification: str   # brilliant / great / best / excellent / good / inaccuracy / mistake / blunder
 
@@ -229,39 +231,46 @@ def analyze_pgn(
         _scan_board.push(move)
     final_board = _scan_board  # position after the last move
 
-    # Analyse every pre-move position once (multipv=2) plus the final position.
-    # pos_infos[i] corresponds to mainline[i]'s pre-move board; pos_infos[N] is the final board.
-    # This gives each move's "after" eval for free: it equals pos_infos[i+1].best_cp.
-    # Net result: N+1 engine calls instead of ~3N.
-    def _analyse_board(engine: chess.engine.SimpleEngine, board: chess.Board, multipv: int = 1) -> tuple[float, float | None, str]:
-        """Return (best_cp_white, second_cp_white_or_None, best_move_uci_str)."""
-        result = engine.analyse(board, limit, multipv=multipv)
-        if isinstance(result, list):
-            top = result[0]
-            second_cp: float | None = _cp(result[1]["score"].white()) if len(result) > 1 else None
-        else:
-            top = result
-            second_cp = None
-        best_cp = _cp(top["score"].white())
-        best_uci = top.get("pv", [None])[0]
-        return best_cp, second_cp, best_uci.uci() if best_uci else ""
-
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
         engine.configure(engine_options)
 
-        # First pass: analyse every position with multipv=1 (fast path).
-        # pos_infos[i] = pre-move eval for mainline[i]; pos_infos[N] = final position eval.
-        pos_infos: list[tuple[float, float | None, str]] = []
+        # Analyse every position with multipv=3 to capture the top 3 candidate moves.
+        # pos_infos[i] = (best_cp, second_cp, third_cp, best_uci, second_uci, third_uci)
+        # for the pre-move board of mainline[i]; pos_infos[N] is the final position.
+        # Using multipv=3 throughout eliminates the separate selective multipv=2 pass
+        # that was previously needed only for brilliant/great detection.
+        def _analyse_board(board: chess.Board) -> tuple[float, float | None, float | None, str, str, str]:
+            result = engine.analyse(board, limit, multipv=3)
+            entries = result if isinstance(result, list) else [result]
+
+            def _entry(idx: int) -> tuple[float, str]:
+                if idx < len(entries):
+                    e = entries[idx]
+                    cp = _cp(e["score"].white())
+                    pv = e.get("pv", [])
+                    uci = pv[0].uci() if pv else ""
+                    return cp, uci
+                return 0.0, ""
+
+            best_cp, best_uci = _entry(0)
+            second_uci = _entry(1)[1] if len(entries) > 1 else ""
+            third_uci  = _entry(2)[1] if len(entries) > 2 else ""
+
+            second_cp: float | None = _entry(1)[0] if len(entries) > 1 else None
+            third_cp:  float | None = _entry(2)[0] if len(entries) > 2 else None
+            return best_cp, second_cp, third_cp, best_uci, second_uci, third_uci
+
+        pos_infos: list[tuple[float, float | None, float | None, str, str, str]] = []
         boards_to_analyse = [b for b, _, _, _ in mainline] + [final_board]
         for i, board in enumerate(boards_to_analyse):
-            pos_infos.append(_analyse_board(engine, board, multipv=1))
+            pos_infos.append(_analyse_board(board))
             if move_callback and i < len(mainline):
                 _, _, san, ply = mainline[i]
                 move_callback(ply, total_moves, san)
 
         # Pair pre/post evals and build results.
         for idx, (board, move, san, ply) in enumerate(mainline):
-            best_cp_before, _, best_move_str = pos_infos[idx]
+            best_cp_before, second_cp_before, _, best_move_str, second_move_str, third_move_str = pos_infos[idx]
             after_cp = pos_infos[idx + 1][0]
 
             is_white_move = board.turn == chess.WHITE
@@ -279,6 +288,8 @@ def analyze_pgn(
                     cp_eval=after_cp,
                     best_move=move.uci(),
                     arrow_uci=move.uci(),
+                    arrow_uci_2=second_move_str,
+                    arrow_uci_3=third_move_str,
                     cpl=0.0,
                     classification="best",
                 ))
@@ -288,12 +299,6 @@ def analyze_pgn(
                 cpl = max(0.0, best_cp_before - after_cp)
             else:
                 cpl = max(0.0, after_cp - best_cp_before)
-
-            # Only fetch second-best move when the played move is near-best (CPL < 10),
-            # since brilliant/great detection requires it and blunders/mistakes never qualify.
-            second_cp_before: float | None = None
-            if cpl < _GREAT_MAX_CPL and len(legal_moves) > 1:
-                _, second_cp_before, _ = _analyse_board(engine, board, multipv=2)
 
             if is_white_move:
                 second_cp_mover = second_cp_before
@@ -330,6 +335,8 @@ def analyze_pgn(
                 cp_eval=after_cp,
                 best_move=best_move_str,
                 arrow_uci=best_move_str,
+                arrow_uci_2=second_move_str,
+                arrow_uci_3=third_move_str,
                 cpl=cpl,
                 classification=classification,
             ))

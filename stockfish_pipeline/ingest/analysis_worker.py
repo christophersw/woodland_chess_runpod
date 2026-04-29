@@ -153,6 +153,8 @@ def _save_analysis(job: _ClaimedJob, result) -> None:
                 cp_eval=mr.cp_eval,
                 best_move=mr.best_move,
                 arrow_uci=mr.arrow_uci,
+                arrow_uci_2=mr.arrow_uci_2,
+                arrow_uci_3=mr.arrow_uci_3,
                 cpl=mr.cpl,
                 classification=mr.classification,
             ))
