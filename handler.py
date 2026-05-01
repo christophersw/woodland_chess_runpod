@@ -24,6 +24,7 @@ Returns:
     "error":          str   # only present when status == "error"
 }
 """
+
 from __future__ import annotations
 
 import json
@@ -147,6 +148,8 @@ def _save_analysis(session, game_id: str, result) -> None:
                 cp_eval=mr.cp_eval,
                 best_move=mr.best_move,
                 arrow_uci=mr.arrow_uci,
+                arrow_uci_2=mr.arrow_uci_2,
+                arrow_uci_3=mr.arrow_uci_3,
                 cpl=mr.cpl,
                 classification=mr.classification,
             )
@@ -206,7 +209,11 @@ def handler(job: dict) -> dict:
 
     log.info(
         "Starting analysis: game_id=%s depth=%d threads=%d hash_mb=%d syzygy=%s",
-        game_id, depth, threads, hash_mb, SYZYGY_PATH,
+        game_id,
+        depth,
+        threads,
+        hash_mb,
+        SYZYGY_PATH,
     )
 
     # --- Run analysis (permanent errors caught here) ---
@@ -275,8 +282,10 @@ def handler(job: dict) -> dict:
 
     log.info(
         "Completed: game_id=%s moves=%d acc_w=%.1f acc_b=%.1f",
-        game_id, len(result.moves),
-        result.white_stats.accuracy, result.black_stats.accuracy,
+        game_id,
+        len(result.moves),
+        result.white_stats.accuracy,
+        result.black_stats.accuracy,
     )
 
     return {
