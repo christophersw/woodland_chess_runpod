@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -44,14 +53,22 @@ class Game(Base):
     lichess_opening: Mapped[str | None] = mapped_column(String(200), nullable=True)
     pgn: Mapped[str] = mapped_column(Text, default="")
 
-    analysis: Mapped["GameAnalysis | None"] = relationship(back_populates="game", uselist=False)
-    participants: Mapped[list["GameParticipant"]] = relationship(back_populates="game", cascade="all, delete-orphan")
-    analysis_jobs: Mapped[list["AnalysisJob"]] = relationship(back_populates="game", cascade="all, delete-orphan")
+    analysis: Mapped["GameAnalysis | None"] = relationship(
+        back_populates="game", uselist=False
+    )
+    participants: Mapped[list["GameParticipant"]] = relationship(
+        back_populates="game", cascade="all, delete-orphan"
+    )
+    analysis_jobs: Mapped[list["AnalysisJob"]] = relationship(
+        back_populates="game", cascade="all, delete-orphan"
+    )
 
 
 class GameParticipant(Base):
     __tablename__ = "game_participants"
-    __table_args__ = (UniqueConstraint("game_id", "player_id", name="uq_game_participant"),)
+    __table_args__ = (
+        UniqueConstraint("game_id", "player_id", name="uq_game_participant"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     game_id: Mapped[str] = mapped_column(ForeignKey("games.id"), index=True)
@@ -75,7 +92,9 @@ class GameAnalysis(Base):
     __tablename__ = "game_analysis"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    game_id: Mapped[str] = mapped_column(ForeignKey("games.id"), unique=True, index=True)
+    game_id: Mapped[str] = mapped_column(
+        ForeignKey("games.id"), unique=True, index=True
+    )
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     engine_depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
     summary_cp: Mapped[float] = mapped_column(Float, default=0.0)
@@ -91,7 +110,9 @@ class GameAnalysis(Base):
     black_inaccuracies: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     game: Mapped[Game] = relationship(back_populates="analysis")
-    moves: Mapped[list["MoveAnalysis"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
+    moves: Mapped[list["MoveAnalysis"]] = relationship(
+        back_populates="analysis", cascade="all, delete-orphan"
+    )
 
 
 class MoveAnalysis(Base):
@@ -108,6 +129,9 @@ class MoveAnalysis(Base):
     arrow_uci: Mapped[str] = mapped_column(String(8), default="")
     arrow_uci_2: Mapped[str | None] = mapped_column(String(8), nullable=True)
     arrow_uci_3: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    arrow_score_1: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arrow_score_2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arrow_score_3: Mapped[float | None] = mapped_column(Float, nullable=True)
     classification: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     analysis: Mapped[GameAnalysis] = relationship(back_populates="moves")
@@ -167,8 +191,12 @@ class SystemEvent(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     event_type: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(16), index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
