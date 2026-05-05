@@ -34,13 +34,15 @@ _db_lock = threading.Lock()
 
 
 def init_db() -> None:
-    """Create all tables if they don't exist. Safe to call many times — only runs once per process."""
+    """Create all tables if they don't exist and apply pending column migrations. Safe to call many times — only runs once per process."""
     global _db_initialized
     if _db_initialized:
         return
     with _db_lock:
         if not _db_initialized:
             Base.metadata.create_all(ENGINE)
+            from stockfish_pipeline.storage.migrate_add_pv_continuations import migrate_add_pv_continuations
+            migrate_add_pv_continuations(ENGINE)
             _db_initialized = True
 
 
