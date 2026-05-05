@@ -1,6 +1,16 @@
-"""Worker that claims AnalysisJob rows and runs Stockfish analysis."""
+"""
+Title: analysis_worker.py — Stockfish analysis job worker
+Description:
+    Claims pending AnalysisJob rows from the database and runs Stockfish
+    analysis on each game's PGN. Persists GameAnalysis and MoveAnalysis
+    results, updates GameParticipant statistics, and manages worker heartbeats.
+
+Changelog:
+    2026-05-05 (#1): Add pv_san_1/2/3 persistence in _save_analysis()
+"""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -157,6 +167,9 @@ def _save_analysis(job: _ClaimedJob, result) -> None:
                 arrow_uci_3=mr.arrow_uci_3,
                 cpl=mr.cpl,
                 classification=mr.classification,
+                pv_san_1=json.dumps(mr.pv_san_1) if mr.pv_san_1 else None,
+                pv_san_2=json.dumps(mr.pv_san_2) if mr.pv_san_2 else None,
+                pv_san_3=json.dumps(mr.pv_san_3) if mr.pv_san_3 else None,
             ))
 
         game = session.get(Game, job.game_id)

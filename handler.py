@@ -1,28 +1,14 @@
 """
-RunPod Serverless Worker — Stockfish Analysis Handler
-=====================================================
-Receives a job with a PGN string and game_id, runs Stockfish analysis via the
-existing stockfish_pipeline.services.stockfish_service module, and writes
-results directly to PostgreSQL using the same schema as the Railway worker.
+Title: handler.py — RunPod serverless Stockfish analysis handler
+Description:
+    RunPod serverless worker handler that receives PGN strings and game IDs,
+    runs Stockfish analysis via stockfish_pipeline.services, and persists
+    results to PostgreSQL using the same schema as the Railway worker.
+    Handles both transient DB failures (retried by RunPod) and permanent
+    errors (returned without retry).
 
-Expected job["input"]:
-{
-    "game_id": str,      # Primary key of Game row (string, e.g. chess.com URL slug)
-    "pgn":     str,      # Full PGN string of the game
-    "depth":   int,      # Optional — overrides ANALYSIS_DEPTH env var
-    "threads": int,      # Optional — overrides ANALYSIS_THREADS env var
-    "hash_mb": int       # Optional — overrides ANALYSIS_HASH_MB env var
-}
-
-Returns:
-{
-    "game_id":        str,
-    "moves_analysed": int,
-    "accuracy_white": float,
-    "accuracy_black": float,
-    "status":         "ok" | "error",
-    "error":          str   # only present when status == "error"
-}
+Changelog:
+    2026-05-05 (#1): Add pv_san_1/2/3 persistence in _save_analysis()
 """
 
 from __future__ import annotations
@@ -155,6 +141,9 @@ def _save_analysis(session, game_id: str, result) -> None:
                 arrow_score_3=mr.arrow_score_3,
                 cpl=mr.cpl,
                 classification=mr.classification,
+                pv_san_1=json.dumps(mr.pv_san_1) if mr.pv_san_1 else None,
+                pv_san_2=json.dumps(mr.pv_san_2) if mr.pv_san_2 else None,
+                pv_san_3=json.dumps(mr.pv_san_3) if mr.pv_san_3 else None,
             )
         )
 

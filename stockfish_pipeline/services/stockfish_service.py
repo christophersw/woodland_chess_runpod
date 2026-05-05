@@ -1,11 +1,22 @@
-"""Stockfish analysis service using python-chess chess.engine."""
+"""
+Title: stockfish_service.py — Stockfish game analysis service
+Description:
+    Analyses chess games using Stockfish via python-chess chess.engine.
+    Produces per-move centipawn loss, accuracy, move classification, and
+    top-3 multipv candidate continuations (UCI arrows + full SAN sequences).
+    Exposes analyze_pgn() for raw PGN strings and analyse_game() for
+    pre-parsed chess.pgn.Game objects.
+
+Changelog:
+    2026-05-05 (#1): Extract and persist full PV continuations for all 3 multipv lines
+"""
 
 from __future__ import annotations
 
 import io
 import math
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import chess
@@ -45,6 +56,9 @@ class MoveResult:
     arrow_score_1: float | None = None  # mover-perspective score for best candidate
     arrow_score_2: float | None = None  # mover-perspective score for 2nd candidate
     arrow_score_3: float | None = None  # mover-perspective score for 3rd candidate
+    pv_san_1: list[str] = field(default_factory=list)  # full SAN continuation for line 1
+    pv_san_2: list[str] = field(default_factory=list)  # full SAN continuation for line 2
+    pv_san_3: list[str] = field(default_factory=list)  # full SAN continuation for line 3
     cpl: float = 0.0  # centipawn loss for the side that just moved (≥ 0)
     classification: str = "best"  # brilliant / great / best / excellent / good / inaccuracy / mistake / blunder
 
@@ -256,34 +270,92 @@ def analyze_pgn(
         engine.configure(engine_options)
 
         # Analyse every position with multipv=3 to capture the top 3 candidate moves.
-        # pos_infos[i] = (best_cp, second_cp, third_cp, best_uci, second_uci, third_uci)
+        # pos_infos[i] holds a 9-tuple:
+        #   (best_cp, second_cp, third_cp,
+        #    best_uci, second_uci, third_uci,
+        #    pv_san_1, pv_san_2, pv_san_3)
         # for the pre-move board of mainline[i]; pos_infos[N] is the final position.
         # Using multipv=3 throughout eliminates the separate selective multipv=2 pass
         # that was previously needed only for brilliant/great detection.
         def _analyse_board(
             board: chess.Board,
-        ) -> tuple[float, float | None, float | None, str, str, str]:
+        ) -> tuple[
+            float, float | None, float | None,
+            str, str, str,
+            list[str], list[str], list[str],
+        ]:
+            """Analyse a single board position with Stockfish at multipv=3.
+
+            Parameters:
+                board: the chess.Board position to analyse.
+
+            Returns:
+                A 9-tuple of
+                (best_cp, second_cp, third_cp,
+                 best_uci, second_uci, third_uci,
+                 pv_san_1, pv_san_2, pv_san_3)
+                where *_cp values are white-relative centipawns, *_uci values are
+                the first move of each pv line in UCI notation, and pv_san_* are
+                the full move continuations as SAN strings (walked on a board copy
+                so the source position is never mutated).
+                second_cp and third_cp are None when fewer than 2 or 3 lines exist.
+            """
             result = engine.analyse(board, limit, multipv=3)
             entries = result if isinstance(result, list) else [result]
 
-            def _entry(idx: int) -> tuple[float, str]:
+            def _entry(idx: int) -> tuple[float, str, list[str]]:
+                """Extract cp, first-move UCI, and full SAN continuation for one pv line.
+
+                Parameters:
+                    idx: zero-based index into the multipv entries list.
+
+                Returns:
+                    (cp, uci, san_moves) — cp is white-relative centipawns,
+                    uci is the first move in UCI notation (empty string if no moves),
+                    san_moves is the full continuation as a list of SAN strings.
+                    Returns (0.0, "", []) when idx is out of range.
+                """
                 if idx < len(entries):
                     e = entries[idx]
                     cp = _cp(e["score"].white())
                     pv = e.get("pv", [])
                     uci = pv[0].uci() if pv else ""
-                    return cp, uci
-                return 0.0, ""
+                    # Walk the full pv on a temporary board copy to generate SAN
+                    # notation — python-chess requires the position to compute SAN.
+                    temp_board = board.copy()
+                    san_moves: list[str] = []
+                    for pv_move in pv:
+                        san_moves.append(temp_board.san(pv_move))
+                        temp_board.push(pv_move)
+                    return cp, uci, san_moves
+                return 0.0, "", []
 
-            best_cp, best_uci = _entry(0)
-            second_uci = _entry(1)[1] if len(entries) > 1 else ""
-            third_uci = _entry(2)[1] if len(entries) > 2 else ""
+            best_cp, best_uci, pv_san_1 = _entry(0)
 
-            second_cp: float | None = _entry(1)[0] if len(entries) > 1 else None
-            third_cp: float | None = _entry(2)[0] if len(entries) > 2 else None
-            return best_cp, second_cp, third_cp, best_uci, second_uci, third_uci
+            if len(entries) > 1:
+                second_cp_val, second_uci, pv_san_2 = _entry(1)
+                second_cp: float | None = second_cp_val
+            else:
+                second_uci, pv_san_2, second_cp = "", [], None
 
-        pos_infos: list[tuple[float, float | None, float | None, str, str, str]] = []
+            if len(entries) > 2:
+                third_cp_val, third_uci, pv_san_3 = _entry(2)
+                third_cp: float | None = third_cp_val
+            else:
+                third_uci, pv_san_3, third_cp = "", [], None
+            return (
+                best_cp, second_cp, third_cp,
+                best_uci, second_uci, third_uci,
+                pv_san_1, pv_san_2, pv_san_3,
+            )
+
+        pos_infos: list[
+            tuple[
+                float, float | None, float | None,
+                str, str, str,
+                list[str], list[str], list[str],
+            ]
+        ] = []
         boards_to_analyse = [b for b, _, _, _ in mainline] + [final_board]
         for i, board in enumerate(boards_to_analyse):
             pos_infos.append(_analyse_board(board))
@@ -300,6 +372,9 @@ def analyze_pgn(
                 best_move_str,
                 second_move_str,
                 third_move_str,
+                pv_san_1,
+                pv_san_2,
+                pv_san_3,
             ) = pos_infos[idx]
             after_cp = pos_infos[idx + 1][0]
 
@@ -336,6 +411,9 @@ def analyze_pgn(
                         arrow_score_1=score_1,
                         arrow_score_2=score_2,
                         arrow_score_3=score_3,
+                        pv_san_1=pv_san_1,
+                        pv_san_2=pv_san_2,
+                        pv_san_3=pv_san_3,
                         cpl=0.0,
                         classification="best",
                     )
@@ -392,6 +470,9 @@ def analyze_pgn(
                     arrow_score_1=score_1,
                     arrow_score_2=score_2,
                     arrow_score_3=score_3,
+                    pv_san_1=pv_san_1,
+                    pv_san_2=pv_san_2,
+                    pv_san_3=pv_san_3,
                     cpl=cpl,
                     classification=classification,
                 )

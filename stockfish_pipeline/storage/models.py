@@ -1,3 +1,13 @@
+"""
+Title: models.py — SQLAlchemy ORM models for Stockfish analysis storage
+Description:
+    Defines database models for storing chess games, players, analysis results,
+    and worker heartbeats. Includes GameAnalysis and MoveAnalysis for
+    persisting Stockfish engine evaluations and principal variations.
+
+Changelog:
+    2026-05-05 (#1): Add pv_san_1/2/3 columns for full PV continuation storage
+"""
 from datetime import datetime
 
 from sqlalchemy import (
@@ -132,6 +142,9 @@ class MoveAnalysis(Base):
     arrow_score_1: Mapped[float | None] = mapped_column(Float, nullable=True)
     arrow_score_2: Mapped[float | None] = mapped_column(Float, nullable=True)
     arrow_score_3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pv_san_1: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pv_san_2: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pv_san_3: Mapped[str | None] = mapped_column(Text, nullable=True)
     classification: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     analysis: Mapped[GameAnalysis] = relationship(back_populates="moves")

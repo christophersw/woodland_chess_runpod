@@ -1,7 +1,7 @@
 ---
 id: 1
 title: Persist Continuations
-status: open
+status: in-progress
 priority: high
 labels: [enhancement]
 created: "2026-05-05"
