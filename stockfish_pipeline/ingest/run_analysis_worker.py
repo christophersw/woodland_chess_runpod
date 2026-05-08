@@ -1,22 +1,31 @@
-"""CLI entry point for the Stockfish analysis worker.
+"""
+Title: run_analysis_worker.py — CLI entry point for the Stockfish analysis worker
+Description:
+    Parses command-line arguments and drives the analysis worker loop.
+    Supports enqueueing unanalyzed games, running analysis against a local or
+    configured Stockfish binary, and printing queue status.
 
-Usage examples:
-  # Enqueue all unanalyzed games, then run analysis on this machine:
-  python -m stockfish_pipeline.ingest.run_analysis_worker --enqueue
+    Usage examples:
+      # Enqueue all unanalyzed games, then run analysis on this machine:
+      python -m stockfish_pipeline.ingest.run_analysis_worker --enqueue
 
-  # Run worker using a specific Stockfish binary:
-  python -m stockfish_pipeline.ingest.run_analysis_worker --stockfish /usr/local/bin/stockfish
+      # Run worker using a specific Stockfish binary:
+      python -m stockfish_pipeline.ingest.run_analysis_worker --stockfish /usr/local/bin/stockfish
 
-  # Full pipeline: enqueue + analyze, depth 18, exit when queue empty:
-  python -m stockfish_pipeline.ingest.run_analysis_worker --enqueue --stockfish /path/to/sf --depth 18 --no-poll
+      # Full pipeline: enqueue + analyze, depth 18, exit when queue empty:
+      python -m stockfish_pipeline.ingest.run_analysis_worker --enqueue --stockfish /path/to/sf --depth 18 --no-poll
 
-  # Just show queue status:
-  python -m stockfish_pipeline.ingest.run_analysis_worker --status
+      # Just show queue status:
+      python -m stockfish_pipeline.ingest.run_analysis_worker --status
+
+Changelog:
+    2026-05-07 (#1): Add file header and docstrings; fix shutil.os path access
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shutil
 import sys
 
@@ -29,19 +38,38 @@ log = logging.getLogger(__name__)
 
 
 def _find_stockfish(given: str) -> str:
+    """Resolve the path to the Stockfish binary, falling back to common install locations.
+
+    Parameters:
+        given: explicit path from the --stockfish CLI argument (may be empty string).
+
+    Returns:
+        Resolved path string if found, or empty string if Stockfish cannot be located.
+    """
     if given:
         return given
     found = shutil.which("stockfish")
     if found:
         return found
-    # Common macOS Homebrew / Linux paths
     for candidate in ["/usr/local/bin/stockfish", "/usr/bin/stockfish", "/opt/homebrew/bin/stockfish"]:
-        if shutil.os.path.isfile(candidate):
+        if os.path.isfile(candidate):
             return candidate
     return ""
 
 
 def main() -> None:
+    """Parse CLI arguments and run the appropriate worker action.
+
+    Actions (mutually exclusive or composable via flags):
+        --status        Print queue status counts and exit.
+        --enqueue       Enqueue unanalyzed games before starting the worker.
+        --enqueue-only  Enqueue jobs and exit without starting the worker.
+        (default)       Start the worker loop against the resolved Stockfish binary.
+
+    Side effects:
+        Initializes the database schema, writes analysis results to PostgreSQL,
+        and exits with code 1 if Stockfish cannot be found.
+    """
     from stockfish_pipeline.config import get_settings
 
     settings = get_settings()

@@ -4,7 +4,7 @@ Description:
     Analyses chess games using Stockfish via python-chess chess.engine.
     Produces per-move centipawn loss, accuracy, move classification, and
     top-3 multipv candidate continuations (UCI arrows + full SAN sequences).
-    Exposes analyze_pgn() for raw PGN strings and analyse_game() for
+    Exposes analyze_pgn() for raw PGN strings and analyze_game() for
     pre-parsed chess.pgn.Game objects.
 
 Changelog:
@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import math
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -82,7 +83,15 @@ class GameResult:
 
 
 def _cp(score: chess.engine.Score) -> float:
-    """Convert a Score to white-relative centipawns, preserving mate distance."""
+    """Convert a python-chess Score to white-relative centipawns, preserving mate distance.
+
+    Parameters:
+        score: a chess.engine.Score from a multipv info entry.
+
+    Returns:
+        Float centipawn value from White's perspective. Mate-in-N is encoded as
+        ±10000 so downstream arithmetic stays finite.
+    """
     if score.is_mate():
         encoded = score.score(mate_score=10000)
         if encoded is not None:
@@ -120,7 +129,14 @@ def _move_accuracy(wp_before: float, wp_after: float) -> float:
 
 
 def _harmonic_mean(values: list[float]) -> float:
-    """Harmonic mean, safe for near-zero values."""
+    """Compute the harmonic mean of a list of floats, safe for near-zero inputs.
+
+    Parameters:
+        values: per-move accuracy percentages (0–100).
+
+    Returns:
+        Harmonic mean clamped away from zero via a small epsilon; 0.0 for empty input.
+    """
     if not values:
         return 0.0
     eps = 0.001
@@ -128,7 +144,15 @@ def _harmonic_mean(values: list[float]) -> float:
 
 
 def _weighted_mean(values: list[float], weights: list[float]) -> float:
-    """Weighted arithmetic mean."""
+    """Compute the weighted arithmetic mean of values.
+
+    Parameters:
+        values: per-move accuracy percentages (0–100).
+        weights: positional volatility weights, one per value.
+
+    Returns:
+        Weighted mean; falls back to simple mean when total weight is zero.
+    """
     if not values:
         return 0.0
     total_weight = sum(weights)
@@ -177,16 +201,28 @@ def _classify(
     second_cp_before: float | None,
     is_capture: bool,
 ) -> str:
-    """Classify a move.
+    """Classify a move into a quality tier based on CPL and position context.
 
-    brilliant (!!): near-best material sacrifice, not already clearly winning.
-    great    (!):  only-good-move in a difficult position.
-    best:          CPL < 10, neither brilliant nor great.
-    excellent:     CPL 10–49.
-    good:          (reserved for future use / removed from this scale)
-    inaccuracy:    CPL 50–99.
-    mistake:       CPL 100–299.
-    blunder:       CPL ≥ 300.
+    Parameters:
+        cpl: centipawn loss for the side that moved (≥ 0, mover-relative).
+        wp_before: win percentage for the mover before the move (0–100).
+        wp_after: win percentage for the mover after the move (0–100).
+        best_cp_before: engine's top-line eval before the move (mover-relative cp).
+        second_cp_before: engine's second-line eval before the move (mover-relative cp),
+            or None when only one legal move exists.
+        is_capture: True if the played move captured a piece.
+
+    Returns:
+        One of: 'brilliant', 'great', 'best', 'excellent', 'inaccuracy', 'mistake', 'blunder'.
+
+    Classification tiers:
+        brilliant (!!): near-best material sacrifice, not already clearly winning.
+        great    (!):  only-good-move in a difficult position.
+        best:          CPL < 10, neither brilliant nor great.
+        excellent:     CPL 10–49.
+        inaccuracy:    CPL 50–99.
+        mistake:       CPL 100–299.
+        blunder:       CPL ≥ 300.
     """
     if cpl >= _BLUNDER_CPL:
         return "blunder"
@@ -226,11 +262,29 @@ def analyze_pgn(
     threads: int = 1,
     hash_mb: int = 256,
     syzygy_path: str | None = None,
-    move_callback: "callable[[int, int, str], None] | None" = None,
+    move_callback: Callable[[int, int, str], None] | None = None,
 ) -> GameResult:
-    """Analyze a full game PGN and return per-move results plus player stats.
+    """Analyze a full game PGN string and return per-move results and player stats.
 
-    move_callback(ply, total_moves, san) is called after each move is analyzed.
+    Runs Stockfish at multipv=3 for every position once, then pairs pre/post evals
+    to compute CPL, accuracy, and classification for each move.
+
+    Parameters:
+        pgn_text: raw PGN string for the game to analyze.
+        stockfish_path: absolute path to the Stockfish binary.
+        depth: analysis depth passed to Stockfish (default 20).
+        threads: number of Stockfish search threads (default 1).
+        hash_mb: Stockfish hash table size in MB (default 256).
+        syzygy_path: optional path to Syzygy endgame tablebases directory.
+        move_callback: optional callable invoked after each move is analyzed,
+            with signature (ply: int, total_moves: int, san: str) -> None.
+
+    Returns:
+        GameResult containing white_stats, black_stats, a MoveResult per ply,
+        the engine depth used, and the UTC timestamp of analysis.
+
+    Raises:
+        ValueError: if pgn_text cannot be parsed as a valid PGN game.
     """
     game = chess.pgn.read_game(io.StringIO(pgn_text))
     if game is None:
@@ -252,7 +306,7 @@ def analyze_pgn(
     white_wps: list[float] = []  # mover-relative win% after each white move
     black_wps: list[float] = []  # mover-relative win% after each black move
 
-    # Collect all positions in one pass so we can analyse each board exactly once.
+    # Collect all positions in one pass so we can analyze each board exactly once.
     # Each position's pre-move eval doubles as the previous position's post-move eval.
     # This cuts engine calls from ~3N to N+1 (one multipv=2 call per position, plus
     # one call for the final position to get the last move's post-move eval).
@@ -269,7 +323,7 @@ def analyze_pgn(
     with chess.engine.SimpleEngine.popen_uci(stockfish_path) as engine:
         engine.configure(engine_options)
 
-        # Analyse every position with multipv=3 to capture the top 3 candidate moves.
+        # Analyze every position with multipv=3 to capture the top 3 candidate moves.
         # pos_infos[i] holds a 9-tuple:
         #   (best_cp, second_cp, third_cp,
         #    best_uci, second_uci, third_uci,
@@ -277,17 +331,17 @@ def analyze_pgn(
         # for the pre-move board of mainline[i]; pos_infos[N] is the final position.
         # Using multipv=3 throughout eliminates the separate selective multipv=2 pass
         # that was previously needed only for brilliant/great detection.
-        def _analyse_board(
+        def _analyze_board(
             board: chess.Board,
         ) -> tuple[
             float, float | None, float | None,
             str, str, str,
             list[str], list[str], list[str],
         ]:
-            """Analyse a single board position with Stockfish at multipv=3.
+            """Analyze a single board position with Stockfish at multipv=3.
 
             Parameters:
-                board: the chess.Board position to analyse.
+                board: the chess.Board position to analyze.
 
             Returns:
                 A 9-tuple of
@@ -356,9 +410,9 @@ def analyze_pgn(
                 list[str], list[str], list[str],
             ]
         ] = []
-        boards_to_analyse = [b for b, _, _, _ in mainline] + [final_board]
-        for i, board in enumerate(boards_to_analyse):
-            pos_infos.append(_analyse_board(board))
+        boards_to_analyze = [b for b, _, _, _ in mainline] + [final_board]
+        for i, board in enumerate(boards_to_analyze):
+            pos_infos.append(_analyze_board(board))
             if move_callback and i < len(mainline):
                 _, _, san, ply = mainline[i]
                 move_callback(ply, total_moves, san)
@@ -481,6 +535,16 @@ def analyze_pgn(
     def _stats(
         cpls: list[float], move_accs: list[float], wps: list[float]
     ) -> PlayerStats:
+        """Aggregate per-move data into a PlayerStats summary for one color.
+
+        Parameters:
+            cpls: centipawn-loss values for each of the player's moves.
+            move_accs: per-move accuracy percentages (0–100).
+            wps: win-percentage after each of the player's moves (mover-relative).
+
+        Returns:
+            PlayerStats with accuracy, ACPL, and blunder/mistake/inaccuracy counts.
+        """
         if not cpls:
             return PlayerStats(
                 accuracy=100.0, acpl=0.0, blunders=0, mistakes=0, inaccuracies=0
@@ -502,7 +566,7 @@ def analyze_pgn(
     )
 
 
-def analyse_game(
+def analyze_game(
     game: chess.pgn.Game,
     stockfish_path: str,
     depth: int = 20,

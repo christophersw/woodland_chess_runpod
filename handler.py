@@ -70,6 +70,21 @@ def _write_system_event(
     details: dict | None = None,
     error_message: str | None = None,
 ) -> None:
+    """Add a SystemEvent audit row to the session (does not commit).
+
+    Parameters:
+        session: active SQLAlchemy session to add the row to.
+        status: outcome string, typically 'completed' or 'failed'.
+        started_at: UTC datetime when the handler began processing.
+        duration_seconds: wall-clock seconds from start to now.
+        game_id: chess.com game ID being analyzed.
+        runpod_job_id: RunPod job ID for cross-referencing logs.
+        details: optional dict of extra metadata merged into the JSON details column.
+        error_message: exception message to store on failure, or None on success.
+
+    Side effects:
+        Adds a SystemEvent to session; caller must commit.
+    """
     event = SystemEvent(
         event_type="stockfish",
         status=status,
@@ -166,7 +181,17 @@ def _save_analysis(session, game_id: str, result) -> None:
 
 
 def _mark_job_completed(session, game_id: str, runpod_job_id: str) -> None:
-    """Mark the matching AnalysisJob row as completed."""
+    """Mark the matching AnalysisJob row as completed and record its duration.
+
+    Parameters:
+        session: active SQLAlchemy session.
+        game_id: chess.com game ID to look up the job.
+        runpod_job_id: RunPod job ID — used with game_id to uniquely identify the row.
+
+    Side effects:
+        Sets status='completed', completed_at, and duration_seconds (from submitted_at).
+        No-ops silently if no matching job row is found.
+    """
     job = session.execute(
         select(AnalysisJob).where(
             AnalysisJob.game_id == game_id,
@@ -248,7 +273,7 @@ def handler(job: dict) -> dict:
                 game_id=game_id,
                 runpod_job_id=runpod_job_id,
                 details={
-                    "moves_analysed": len(result.moves),
+                    "moves_analyzed": len(result.moves),
                     "accuracy_white": result.white_stats.accuracy,
                     "accuracy_black": result.black_stats.accuracy,
                 },
@@ -282,7 +307,7 @@ def handler(job: dict) -> dict:
 
     return {
         "game_id": game_id,
-        "moves_analysed": len(result.moves),
+        "moves_analyzed": len(result.moves),
         "accuracy_white": result.white_stats.accuracy,
         "accuracy_black": result.black_stats.accuracy,
         "status": "ok",

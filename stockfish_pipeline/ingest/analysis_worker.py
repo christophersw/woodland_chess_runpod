@@ -118,13 +118,33 @@ def _claim_job(depth: int) -> _ClaimedJob | None:
 
 
 def _load_pgn(game_id: str) -> str:
+    """Fetch the PGN text for a game from the database.
+
+    Parameters:
+        game_id: primary key of the Game row.
+
+    Returns:
+        PGN string, or empty string if the game row is missing or has no PGN.
+    """
     with get_session() as session:
         game = session.get(Game, game_id)
         return game.pgn if game and game.pgn else ""
 
 
 def _save_analysis(job: _ClaimedJob, result) -> None:
-    """Persist GameAnalysis + MoveAnalysis rows, update GameParticipant stats."""
+    """Persist GameAnalysis and MoveAnalysis rows, then update GameParticipant stats.
+
+    Idempotent: deletes any existing MoveAnalysis rows for the game before re-inserting,
+    so re-running a job produces clean results rather than duplicate rows.
+
+    Parameters:
+        job: the claimed job providing game_id for lookups.
+        result: GameResult returned by analyze_pgn().
+
+    Side effects:
+        Writes/updates game_analysis, move_analysis, and game_participants rows.
+        Commits the session on success.
+    """
     with get_session() as session:
         ga = session.execute(
             select(GameAnalysis).where(GameAnalysis.game_id == job.game_id)
@@ -165,6 +185,9 @@ def _save_analysis(job: _ClaimedJob, result) -> None:
                 arrow_uci=mr.arrow_uci,
                 arrow_uci_2=mr.arrow_uci_2,
                 arrow_uci_3=mr.arrow_uci_3,
+                arrow_score_1=mr.arrow_score_1,
+                arrow_score_2=mr.arrow_score_2,
+                arrow_score_3=mr.arrow_score_3,
                 cpl=mr.cpl,
                 classification=mr.classification,
                 pv_san_1=json.dumps(mr.pv_san_1) if mr.pv_san_1 else None,
@@ -191,6 +214,14 @@ def _save_analysis(job: _ClaimedJob, result) -> None:
 
 
 def _mark_completed(job_id: int) -> None:
+    """Mark an AnalysisJob as completed and record its wall-clock duration.
+
+    Parameters:
+        job_id: primary key of the AnalysisJob to update.
+
+    Side effects:
+        Sets status='completed', completed_at, and duration_seconds on the row.
+    """
     with get_session() as session:
         job = session.get(AnalysisJob, job_id)
         if job:
@@ -235,6 +266,15 @@ def _heartbeat(
 
 
 def _mark_failed(job_id: int, error: str) -> None:
+    """Mark an AnalysisJob as failed and increment its retry counter.
+
+    Parameters:
+        job_id: primary key of the AnalysisJob to update.
+        error: exception message to store for debugging.
+
+    Side effects:
+        Sets status='failed', error_message, and increments retry_count on the row.
+    """
     with get_session() as session:
         job = session.get(AnalysisJob, job_id)
         if job:
@@ -273,7 +313,14 @@ def _recover_stale_jobs() -> int:
         return result.rowcount
 
 
-def run_worker(stockfish_path: str, depth: int = 20, threads: int = 1, hash_mb: int = 256, poll_interval: float = 5.0, limit: int | None = None) -> None:
+def run_worker(
+    stockfish_path: str,
+    depth: int = 20,
+    threads: int = 1,
+    hash_mb: int = 256,
+    poll_interval: float = 5.0,
+    limit: int | None = None,
+) -> None:
     """
     Main worker loop. Continuously claims and processes jobs until no more remain.
     Set poll_interval=0 to exit immediately when the queue is empty.
@@ -338,6 +385,13 @@ def run_worker(stockfish_path: str, depth: int = 20, threads: int = 1, hash_mb: 
                     raise ValueError("No PGN for game")
 
                 def on_move(ply: int, total: int, san: str) -> None:
+                    """Update the inner tqdm progress bar after each move is analyzed.
+
+                    Parameters:
+                        ply: 1-based move number just completed.
+                        total: total moves in the game (denominator for the bar).
+                        san: SAN string of the move just analyzed, shown as postfix.
+                    """
                     if move_bar is None:
                         return
                     if move_bar.total != total:
